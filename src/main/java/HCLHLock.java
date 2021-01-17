@@ -24,8 +24,9 @@ import java.util.concurrent.locks.Lock;
 public class HCLHLock implements Lock {
     /**
      * Max number of clusters
+     * When debug We can set to 1
      */
-    static final int MAX_CLUSTERS = 32;
+    static final int MAX_CLUSTERS = 1;
     /**
      * List of local queues, one per cluster
      */
@@ -37,7 +38,12 @@ public class HCLHLock implements Lock {
     /**
      * My current QNode
      */
-    ThreadLocal<QNode> currNode = new ThreadLocal<QNode>() {
+    ThreadLocal<QNode> currLocalNode = new ThreadLocal<QNode>() {
+        protected QNode initialValue() {
+            return new QNode();
+        };
+    };
+    ThreadLocal<QNode> currGlobalNode = new ThreadLocal<QNode>() {
         protected QNode initialValue() {
             return new QNode();
         };
@@ -45,12 +51,16 @@ public class HCLHLock implements Lock {
     /**
      * My predecessor QNode
      */
-    ThreadLocal<QNode> predNode = new ThreadLocal<QNode>() {
+    ThreadLocal<QNode> predLocalNode = new ThreadLocal<QNode>() {
         protected QNode initialValue() {
             return null;
         };
     };
-
+    ThreadLocal<QNode> predGocalNode = new ThreadLocal<QNode>() {
+        protected QNode initialValue() {
+            return null;
+        };
+    };
     /**
      * Creates a new instance of HCLHLock
      */
@@ -65,46 +75,64 @@ public class HCLHLock implements Lock {
     }
 
     public void lock() {
-        QNode myNode = currNode.get();
-        AtomicReference<QNode> localQueue = localQueues.get(ThreadID.getCluster());
+        QNode myLocalNode = currLocalNode.get();
+        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
+        myLocalNode.setClusterID(myCluster);  // Problem2 dead work no happend
+        AtomicReference<QNode> localQueue = localQueues.get(ThreadID.getCluster(MAX_CLUSTERS));
         // splice my QNode into local queue
-        QNode myPred = null;
+        QNode myLocalPred = null;
+        QNode myGlobalPred = null;
+        QNode localTail = null;
         do {
-            myPred = localQueue.get();
-        } while (!localQueue.compareAndSet(myPred, myNode));
-        if (myPred != null) {
-            boolean iOwnLock = myPred.waitForGrantOrClusterMaster();
+            myLocalPred = localQueue.get();
+        } while (!localQueue.compareAndSet(myLocalPred, myLocalNode));
+
+        if (myLocalPred != null) {
+            boolean iOwnLock = myLocalPred.waitForGrantOrClusterMaster(myCluster);
+            predLocalNode.set(myLocalPred);
             if (iOwnLock) {
                 // I have the lock. Save QNode just released by previous leader
-                predNode.set(myPred);
                 return;
             }
         }
-        // At this point I am the cluster master.
+
         // Splice local queue into global queue.
-        QNode localTail = null;
-        do {
-            myPred = globalQueue.get();
-            localTail = localQueue.get();
-        } while (!globalQueue.compareAndSet(myPred, localTail));
         // inform successor it is the new master
+        localTail = currGlobalNode.get();
+        do {
+            myGlobalPred = globalQueue.get();
+        } while (!globalQueue.compareAndSet(myGlobalPred, localTail));
+
+        // here is local Node
         localTail.setTailWhenSpliced(true);
         // wait for predecessor to release lock
-        while (myPred.isSuccessorMustWait()) {
-        }
-        ;
         // I have the lock. Save QNode just released by previous leader
-        predNode.set(myPred);
-        return;
+        // Global must come from local
+        while (myGlobalPred.isSuccessorMustWait()) {
+        }
+        predGocalNode.set(myGlobalPred);
     }
 
     public void unlock() {
-        QNode myNode = currNode.get();
+
+        QNode myNode = currGlobalNode.get();
         myNode.setSuccessorMustWait(false);
         // promote pred node to current
-        QNode node = predNode.get();
-        node.unlock();
-        currNode.set(node);
+        myNode = currLocalNode.get();
+        myNode.setSuccessorMustWait(false);
+
+
+        QNode myPred= predLocalNode.get();
+        if (myPred != null){
+            myPred.unlock();
+            currLocalNode.set(myPred);
+        }
+
+        myPred= predGocalNode.get();
+        if(myPred != null){
+            myPred.unlock();
+            currGlobalNode.set(myPred);
+        }
     }
 
     static class QNode {
@@ -120,14 +148,16 @@ public class HCLHLock implements Lock {
             state = new AtomicInteger(0);
         }
 
-        boolean waitForGrantOrClusterMaster() {
-            int myCluster = ThreadID.getCluster();
+        boolean waitForGrantOrClusterMaster(int myCluster) {
+
             while (true) {
-                if (getClusterID() == myCluster &&
-                        !isTailWhenSpliced() &&
-                        !isSuccessorMustWait()) {
-                    return true;
+                if (getClusterID() == myCluster) {
+//                    System.out.println("hello");
+                    if (!isTailWhenSpliced() && !isSuccessorMustWait())
+                        return true;
+
                 } else if (getClusterID() != myCluster || isTailWhenSpliced()) {
+//                    System.out.println("world");
                     return false;
                 }
             }
@@ -135,13 +165,14 @@ public class HCLHLock implements Lock {
 
         public void unlock() {
             int oldState = 0;
-            int newState = ThreadID.getCluster();
+            int newState = ThreadID.getCluster(MAX_CLUSTERS) & CLUSTER_MASK;
             // successorMustWait = true;
             newState |= SMW_MASK;
             // tailWhenSpliced = false;
             newState &= (~TWS_MASK);
             do {
                 oldState = state.get();
+                System.out.println(String.format("%d %d ", oldState, newState));
             } while (!state.compareAndSet(oldState, newState));
         }
 
@@ -158,6 +189,7 @@ public class HCLHLock implements Lock {
         }
 
         public boolean isSuccessorMustWait() {
+            System.out.println(String.format("isSuccessorMustWait %d  ", state.get() & SMW_MASK));
             return (state.get() & SMW_MASK) != 0;
         }
 

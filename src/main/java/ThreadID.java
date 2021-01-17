@@ -38,8 +38,8 @@ public class ThreadID {
         threadID.set(value);
     }
 
-    public static int getCluster() {
-        return threadID.get() / 2;
+    public static int getCluster(int n) {
+        return threadID.get() % n;
     }
 
     private static class ThreadLocalID extends ThreadLocal<Integer> {
