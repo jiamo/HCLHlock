@@ -26,7 +26,7 @@ public class HCLHLock implements Lock {
      * Max number of clusters
      * When debug We can set to 1
      */
-    static final int MAX_CLUSTERS = 1;
+    static final int MAX_CLUSTERS = 4;
     /**
      * List of local queues, one per cluster
      */
@@ -173,6 +173,16 @@ public class HCLHLock implements Lock {
         }
 
         public boolean isSuccessorMustWait() {
+//            The magic print
+            System.out.println(String.format("isSuccessorMustWait %d  ", state.get() & SMW_MASK));
+//            why out here make the failed don't happend
+//            Try sleep it was not same as println
+//            try{
+//                Thread.sleep(10);
+//            }
+//            catch (InterruptedException e){
+//                ;
+//            }
             return (state.get() & SMW_MASK) != 0;
         }
 
