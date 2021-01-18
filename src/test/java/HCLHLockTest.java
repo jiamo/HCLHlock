@@ -11,8 +11,8 @@ import junit.framework.*;
  * @author mph
  */
 public class HCLHLockTest extends TestCase {
-    private final static int THREADS = 16;
-    private final static int COUNT = 16 * 128;
+    private final static int THREADS = 32;
+    private final static int COUNT = 32 * 64;
     private final static int PER_THREAD = COUNT / THREADS;
     Thread[] thread = new Thread[THREADS];
     int counter = 0;

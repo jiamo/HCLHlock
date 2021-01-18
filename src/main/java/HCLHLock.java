@@ -26,7 +26,7 @@ public class HCLHLock implements Lock {
      * Max number of clusters
      * When debug We can set to 1
      */
-    static final int MAX_CLUSTERS = 4;
+    static final int MAX_CLUSTERS = 8;
     /**
      * List of local queues, one per cluster
      */
@@ -38,7 +38,7 @@ public class HCLHLock implements Lock {
     /**
      * My current QNode
      */
-    ThreadLocal<QNode> currLocalNode = new ThreadLocal<QNode>() {
+    ThreadLocal<QNode> currNode = new ThreadLocal<QNode>() {
         protected QNode initialValue() {
             return new QNode();
         };
@@ -47,7 +47,7 @@ public class HCLHLock implements Lock {
     /**
      * My predecessor QNode
      */
-    ThreadLocal<QNode> predLocalNode = new ThreadLocal<QNode>() {
+    ThreadLocal<QNode> preNode = new ThreadLocal<QNode>() {
         protected QNode initialValue() {
             return null;
         };
@@ -67,7 +67,7 @@ public class HCLHLock implements Lock {
     }
 
     public void lock() {
-        QNode myLocalNode = currLocalNode.get();
+        QNode myLocalNode = currNode.get();
         int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
         myLocalNode.setClusterID(myCluster);  // Problem2 dead work no happend
         AtomicReference<QNode> localQueue = localQueues.get(ThreadID.getCluster(MAX_CLUSTERS));
@@ -81,7 +81,7 @@ public class HCLHLock implements Lock {
 
         if (myLocalPred != null) {
             boolean iOwnLock = myLocalPred.waitForGrantOrClusterMaster(myCluster);
-            predLocalNode.set(myLocalPred);
+            preNode.set(myLocalPred);
             if (iOwnLock) {
                 // I have the lock. Save QNode just released by previous leader
                 return;
@@ -103,22 +103,20 @@ public class HCLHLock implements Lock {
         // Global must come from local
         while (myGlobalPred.isSuccessorMustWait()) {
         }
-        predLocalNode.set(myGlobalPred);
+        preNode.set(myGlobalPred);
     }
 
     public void unlock() {
 
-        QNode myNode = currLocalNode.get();
+        QNode myNode = currNode.get();
         myNode.setSuccessorMustWait(false);
         // promote pred node to current
-        myNode = currLocalNode.get();
-        myNode.setSuccessorMustWait(false);
+        myNode = currNode.get();
 
-
-        QNode myPred= predLocalNode.get();
+        QNode myPred= preNode.get();
         if (myPred != null){
             myPred.unlock();
-            currLocalNode.set(myPred);
+            currNode.set(myPred);
         }
 
     }
@@ -173,12 +171,15 @@ public class HCLHLock implements Lock {
         }
 
         public boolean isSuccessorMustWait() {
-//            The magic print
-            System.out.println(String.format("isSuccessorMustWait %d  ", state.get() & SMW_MASK));
-//            why out here make the failed don't happend
+//          TODO: In low machine , still may failed
+//          The magic print
+//          spin a little long?
+            System.out.println(String.format("isSuccessorMustWait %d ", 4 * 999  / 2));
+
 //            Try sleep it was not same as println
+//            Sleep yield the cpu. But print cpu don't yield and just
 //            try{
-//                Thread.sleep(10);
+//                Thread.sleep(100);
 //            }
 //            catch (InterruptedException e){
 //                ;
