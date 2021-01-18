@@ -43,11 +43,7 @@ public class HCLHLock implements Lock {
             return new QNode();
         };
     };
-    ThreadLocal<QNode> currGlobalNode = new ThreadLocal<QNode>() {
-        protected QNode initialValue() {
-            return new QNode();
-        };
-    };
+
     /**
      * My predecessor QNode
      */
@@ -56,11 +52,7 @@ public class HCLHLock implements Lock {
             return null;
         };
     };
-    ThreadLocal<QNode> predGocalNode = new ThreadLocal<QNode>() {
-        protected QNode initialValue() {
-            return null;
-        };
-    };
+
     /**
      * Creates a new instance of HCLHLock
      */
@@ -98,9 +90,10 @@ public class HCLHLock implements Lock {
 
         // Splice local queue into global queue.
         // inform successor it is the new master
-        localTail = currGlobalNode.get();
+
         do {
             myGlobalPred = globalQueue.get();
+            localTail = localQueue.get();
         } while (!globalQueue.compareAndSet(myGlobalPred, localTail));
 
         // here is local Node
@@ -110,12 +103,12 @@ public class HCLHLock implements Lock {
         // Global must come from local
         while (myGlobalPred.isSuccessorMustWait()) {
         }
-        predGocalNode.set(myGlobalPred);
+        predLocalNode.set(myGlobalPred);
     }
 
     public void unlock() {
 
-        QNode myNode = currGlobalNode.get();
+        QNode myNode = currLocalNode.get();
         myNode.setSuccessorMustWait(false);
         // promote pred node to current
         myNode = currLocalNode.get();
@@ -128,11 +121,6 @@ public class HCLHLock implements Lock {
             currLocalNode.set(myPred);
         }
 
-        myPred= predGocalNode.get();
-        if(myPred != null){
-            myPred.unlock();
-            currGlobalNode.set(myPred);
-        }
     }
 
     static class QNode {
@@ -151,13 +139,10 @@ public class HCLHLock implements Lock {
         boolean waitForGrantOrClusterMaster(int myCluster) {
 
             while (true) {
-                if (getClusterID() == myCluster) {
-//                    System.out.println("hello");
-                    if (!isTailWhenSpliced() && !isSuccessorMustWait())
-                        return true;
+                if (getClusterID() == myCluster && !isTailWhenSpliced() && !isSuccessorMustWait()) {
+                    return true;
 
                 } else if (getClusterID() != myCluster || isTailWhenSpliced()) {
-//                    System.out.println("world");
                     return false;
                 }
             }
@@ -172,7 +157,6 @@ public class HCLHLock implements Lock {
             newState &= (~TWS_MASK);
             do {
                 oldState = state.get();
-                System.out.println(String.format("%d %d ", oldState, newState));
             } while (!state.compareAndSet(oldState, newState));
         }
 
@@ -189,7 +173,6 @@ public class HCLHLock implements Lock {
         }
 
         public boolean isSuccessorMustWait() {
-            System.out.println(String.format("isSuccessorMustWait %d  ", state.get() & SMW_MASK));
             return (state.get() & SMW_MASK) != 0;
         }
 
