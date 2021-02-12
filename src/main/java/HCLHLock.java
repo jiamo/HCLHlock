@@ -171,19 +171,6 @@ public class HCLHLock implements Lock {
         }
 
         public boolean isSuccessorMustWait() {
-//          TODO: In low machine , still may failed
-//          The magic print
-//          spin a little long?
-            System.out.println(String.format("isSuccessorMustWait %d ", 4 * 999  / 2));
-
-//            Try sleep it was not same as println
-//            Sleep yield the cpu. But print cpu don't yield and just
-//            try{
-//                Thread.sleep(100);
-//            }
-//            catch (InterruptedException e){
-//                ;
-//            }
             return (state.get() & SMW_MASK) != 0;
         }
 

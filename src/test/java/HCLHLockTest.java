@@ -7,6 +7,8 @@
 
 import junit.framework.*;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * @author mph
  */
@@ -15,7 +17,7 @@ public class HCLHLockTest extends TestCase {
     private final static int COUNT = 32 * 64;
     private final static int PER_THREAD = COUNT / THREADS;
     Thread[] thread = new Thread[THREADS];
-    int counter = 0;
+    AtomicInteger counter = new AtomicInteger(0);
 
     HCLHLock instance = new HCLHLock();
 
@@ -40,7 +42,7 @@ public class HCLHLockTest extends TestCase {
             thread[i].join();
         }
 
-        assertEquals(counter, COUNT);
+        assertEquals(counter.get(), COUNT);
     }
 
     class MyThread extends Thread {
@@ -48,8 +50,7 @@ public class HCLHLockTest extends TestCase {
             for (int i = 0; i < PER_THREAD; i++) {
                 instance.lock();
                 try {
-                    counter = counter + 1;
-//                    System.out.println(counter);
+                    counter.getAndIncrement();
                 } finally {
                     instance.unlock();
                 }
