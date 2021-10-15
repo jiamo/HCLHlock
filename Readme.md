@@ -1,15 +1,13 @@
 # Desc
 
-sometimes failed  
-sometimes ok  
-sometimes can't stop 
+    sometimes failed  
+    sometimes ok  
+    sometimes can't stop 
 
 # Simple 
 
     mvn test
 
-# The magic print
+# the paper
 
-https://github.com/jiamo/HCLHlock/blob/main/src/main/java/HCLHLock.java#L177
-
-This will make all problem solved!
+    http://www.cs.tau.ac.il/~shanir/nir-pubs-web/Papers/CLH.pdf
