@@ -12,7 +12,7 @@ import junit.framework.*;
  */
 public class HCLHLockTest extends TestCase {
     private final static int THREADS = 32;
-    private final static int COUNT = 32 * 64;
+    private final static int COUNT = 32 * 128;
     private final static int PER_THREAD = COUNT / THREADS;
     Thread[] thread = new Thread[THREADS];
     int counter = 0;
@@ -49,7 +49,6 @@ public class HCLHLockTest extends TestCase {
                 instance.lock();
                 try {
                     counter = counter + 1;
-//                    System.out.println(counter);
                 } finally {
                     instance.unlock();
                 }

@@ -21,7 +21,7 @@ public class ThreadID {
     /**
      * My thread-local ID.
      **/
-    private static ThreadLocalID threadID = new ThreadLocalID();
+    private static ThreadLocalID threadID = new ThreadLocalID();  // this is for thread local
 
     public static int get() {
         return threadID.get();
@@ -39,7 +39,9 @@ public class ThreadID {
     }
 
     public static int getCluster(int n) {
-        return threadID.get() % n;
+        int tn = threadID.get();
+//        System.out.println(tn);
+        return tn % n;
     }
 
     private static class ThreadLocalID extends ThreadLocal<Integer> {

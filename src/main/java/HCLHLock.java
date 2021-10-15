@@ -26,7 +26,7 @@ public class HCLHLock implements Lock {
      * Max number of clusters
      * When debug We can set to 1
      */
-    static final int MAX_CLUSTERS = 8;
+    static final int MAX_CLUSTERS = 1;
     /**
      * List of local queues, one per cluster
      */
@@ -43,10 +43,6 @@ public class HCLHLock implements Lock {
             return new QNode();
         };
     };
-
-    /**
-     * My predecessor QNode
-     */
     ThreadLocal<QNode> preNode = new ThreadLocal<QNode>() {
         protected QNode initialValue() {
             return null;
@@ -63,62 +59,62 @@ public class HCLHLock implements Lock {
         }
         QNode head = new QNode();
         globalQueue = new AtomicReference<QNode>(head);
-
     }
 
     public void lock() {
         QNode myLocalNode = currNode.get();
         int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
-        myLocalNode.setClusterID(myCluster);  // Problem2 dead work no happend
-        AtomicReference<QNode> localQueue = localQueues.get(ThreadID.getCluster(MAX_CLUSTERS));
+        myLocalNode.setClusterID(myCluster);
+        AtomicReference<QNode> localQueue = localQueues.get(myCluster);
         // splice my QNode into local queue
-        QNode myLocalPred = null;
-        QNode myGlobalPred = null;
-        QNode localTail = null;
+        QNode my_pred = null;
+        QNode local_tail = null;
         do {
-            myLocalPred = localQueue.get();
-        } while (!localQueue.compareAndSet(myLocalPred, myLocalNode));
+            my_pred = localQueue.get();
+        } while (!localQueue.compareAndSet(my_pred, myLocalNode));
 
-        if (myLocalPred != null) {
-            boolean iOwnLock = myLocalPred.waitForGrantOrClusterMaster(myCluster);
-            preNode.set(myLocalPred);
+        if (my_pred != null) {
+            boolean iOwnLock = my_pred.waitForGrantOrClusterMaster(myCluster);
             if (iOwnLock) {
                 // I have the lock. Save QNode just released by previous leader
+                preNode.set(my_pred);
                 return;
             }
+        }
+        // http://www.cs.tau.ac.il/~shanir/nir-pubs-web/Papers/CLH.pdf
+        // // At this point, I’m cluster master. Give others time to show up. combining_delay();
+        try {
+            Thread.sleep(1);
+        }catch (Exception e){
         }
 
         // Splice local queue into global queue.
         // inform successor it is the new master
-
         do {
-            myGlobalPred = globalQueue.get();
-            localTail = localQueue.get();
-        } while (!globalQueue.compareAndSet(myGlobalPred, localTail));
+            my_pred = globalQueue.get();
+            local_tail = localQueue.get();
+        } while (!globalQueue.compareAndSet(my_pred, local_tail));
 
         // here is local Node
-        localTail.setTailWhenSpliced(true);
+        local_tail.setTailWhenSpliced(true);
         // wait for predecessor to release lock
         // I have the lock. Save QNode just released by previous leader
         // Global must come from local
-        while (myGlobalPred.isSuccessorMustWait()) {
-        }
-        preNode.set(myGlobalPred);
+        while (my_pred.isSuccessorMustWait()) {}
+        preNode.set(my_pred);
     }
 
     public void unlock() {
 
         QNode myNode = currNode.get();
+//        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
+//        myNode.setClusterID(myCluster);
         myNode.setSuccessorMustWait(false);
-        // promote pred node to current
-        myNode = currNode.get();
-
-        QNode myPred= preNode.get();
+        QNode myPred = preNode.get();
         if (myPred != null){
             myPred.unlock();
             currNode.set(myPred);
         }
-
     }
 
     static class QNode {
@@ -171,19 +167,6 @@ public class HCLHLock implements Lock {
         }
 
         public boolean isSuccessorMustWait() {
-//          TODO: In low machine , still may failed
-//          The magic print
-//          spin a little long?
-            System.out.println(String.format("isSuccessorMustWait %d ", 4 * 999  / 2));
-
-//            Try sleep it was not same as println
-//            Sleep yield the cpu. But print cpu don't yield and just
-//            try{
-//                Thread.sleep(100);
-//            }
-//            catch (InterruptedException e){
-//                ;
-//            }
             return (state.get() & SMW_MASK) != 0;
         }
 
