@@ -38,10 +38,9 @@ public class ThreadID {
         threadID.set(value);
     }
 
-    public static int getCluster(int n) {
+    public static int getCluster(int total_cluster) {
         int tn = threadID.get();
-//        System.out.println(tn);
-        return tn % n;
+        return tn % total_cluster;
     }
 
     private static class ThreadLocalID extends ThreadLocal<Integer> {

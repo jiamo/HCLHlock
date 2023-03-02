@@ -27,6 +27,7 @@ public class HCLHLock implements Lock {
      * When debug We can set to 1
      */
     static final int MAX_CLUSTERS = 1;
+    // TODO at first we only have one Cluster...
     /**
      * List of local queues, one per cluster
      */
@@ -61,14 +62,38 @@ public class HCLHLock implements Lock {
         globalQueue = new AtomicReference<QNode>(head);
     }
 
+    public void lock1(){
+        QNode myNode = currNode.get();
+        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
+        AtomicReference<QNode> localQueue = localQueues.get(myCluster);
+        myNode.setClusterID(myCluster);
+        QNode myPred;
+        QNode otherClusterTail;
+        QNode predLocalTail = replaceQueueTail(localQueue, myNode);
+
+        if (predLocalTail != null && !predLocalTail.isTailWhenSpliced()) {
+            myPred = predLocalTail;
+
+        } else {
+            QNode localTail = localQueue.get();
+            otherClusterTail = replaceQueueTail(globalQueue, localTail);
+            localTail.setTailWhenSpliced(true);
+
+            myPred = otherClusterTail;
+        }
+
+        while(myPred.isSuccessorMustWait()) {};
+        preNode.set(myPred);
+
+    }
     public void lock() {
         QNode myLocalNode = currNode.get();
         int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
         myLocalNode.setClusterID(myCluster);
         AtomicReference<QNode> localQueue = localQueues.get(myCluster);
         // splice my QNode into local queue
-        QNode my_pred = null;
-        QNode local_tail = null;
+        QNode my_pred;
+        QNode local_tail;
         do {
             my_pred = localQueue.get();
         } while (!localQueue.compareAndSet(my_pred, myLocalNode));
@@ -81,25 +106,19 @@ public class HCLHLock implements Lock {
                 return;
             }
         }
-        // http://www.cs.tau.ac.il/~shanir/nir-pubs-web/Papers/CLH.pdf
-        // // At this point, I’m cluster master. Give others time to show up. combining_delay();
-        try {
-            Thread.sleep(1);
-        }catch (Exception e){
-        }
+//         http://www.cs.tau.ac.il/~shanir/nir-pubs-web/Papers/CLH.pdf
+//         At this point, I’m cluster master. Give others time to show up. combining_delay();
+//            try {
+//                Thread.sleep(1);
+//            }catch (Exception e){
+//            }
 
-        // Splice local queue into global queue.
-        // inform successor it is the new master
         do {
             my_pred = globalQueue.get();
             local_tail = localQueue.get();
         } while (!globalQueue.compareAndSet(my_pred, local_tail));
 
-        // here is local Node
         local_tail.setTailWhenSpliced(true);
-        // wait for predecessor to release lock
-        // I have the lock. Save QNode just released by previous leader
-        // Global must come from local
         while (my_pred.isSuccessorMustWait()) {}
         preNode.set(my_pred);
     }
@@ -107,8 +126,8 @@ public class HCLHLock implements Lock {
     public void unlock() {
 
         QNode myNode = currNode.get();
-//        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
-//        myNode.setClusterID(myCluster);
+        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
+        myNode.setClusterID(myCluster);
         myNode.setSuccessorMustWait(false);
         QNode myPred = preNode.get();
         if (myPred != null){
@@ -198,6 +217,14 @@ public class HCLHLock implements Lock {
             } while (!state.compareAndSet(oldState, newState));
         }
 
+    }
+    public QNode replaceQueueTail(AtomicReference<QNode> queue, QNode node) {
+        QNode tail = null;
+        do {
+            tail = queue.get();
+        } while(!queue.compareAndSet(tail, node));
+
+        return tail;
     }
 
     // superfluous declarations needed to satisfy lock interface
