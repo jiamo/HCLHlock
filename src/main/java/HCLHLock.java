@@ -26,8 +26,7 @@ public class HCLHLock implements Lock {
      * Max number of clusters
      * When debug We can set to 1
      */
-    static final int MAX_CLUSTERS = 1;
-    // TODO at first we only have one Cluster...
+    static final int MAX_CLUSTERS = 8;
     /**
      * List of local queues, one per cluster
      */
@@ -62,32 +61,10 @@ public class HCLHLock implements Lock {
         globalQueue = new AtomicReference<QNode>(head);
     }
 
-    public void lock1(){
-        QNode myNode = currNode.get();
-        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
-        AtomicReference<QNode> localQueue = localQueues.get(myCluster);
-        myNode.setClusterID(myCluster);
-        QNode myPred;
-        QNode otherClusterTail;
-        QNode predLocalTail = replaceQueueTail(localQueue, myNode);
-
-        if (predLocalTail != null && !predLocalTail.isTailWhenSpliced()) {
-            myPred = predLocalTail;
-
-        } else {
-            QNode localTail = localQueue.get();
-            otherClusterTail = replaceQueueTail(globalQueue, localTail);
-            localTail.setTailWhenSpliced(true);
-
-            myPred = otherClusterTail;
-        }
-
-        while(myPred.isSuccessorMustWait()) {};
-        preNode.set(myPred);
-
-    }
     public void lock() {
         QNode myLocalNode = currNode.get();
+        myLocalNode.setSuccessorMustWait(true);
+        myLocalNode.setTailWhenSpliced(false);
         int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
         myLocalNode.setClusterID(myCluster);
         AtomicReference<QNode> localQueue = localQueues.get(myCluster);
@@ -105,35 +82,49 @@ public class HCLHLock implements Lock {
                 preNode.set(my_pred);
                 return;
             }
+            // I am the new cluster master. The TWS signal from my predecessor
+            // must be consumed to prevent a thundering herd.
+             my_pred.setTailWhenSpliced(false);
         }
-//         http://www.cs.tau.ac.il/~shanir/nir-pubs-web/Papers/CLH.pdf
-//         At this point, I’m cluster master. Give others time to show up. combining_delay();
-//            try {
-//                Thread.sleep(1);
-//            }catch (Exception e){
-//            }
 
+        //  https://people.csail.mit.edu/shanir/publications/CLH.pdf
+        //  At this point, I’m cluster master.
+
+        // Atomically claim the local queue for splicing. This prevents the race
+        // condition where the local queue is modified between the combining delay
+        // and the splice operation.
+        local_tail = localQueue.getAndSet(null);
+
+        // If the local queue was empty when we claimed it, it means another master
+        // already spliced the queue I was in. I should just wait for my local predecessor.
+        if (local_tail == null) {
+            // My local predecessor is still stored in the my_pred variable from
+            // the initial CAS to join the local queue.
+            while(my_pred.isSuccessorMustWait()) {
+                Thread.yield(); // Yield CPU while waiting
+            }
+            preNode.set(my_pred);
+            return; // I have acquired the lock.
+        }
+
+        // I successfully claimed the local queue. Now, splice it to the global queue.
         do {
             my_pred = globalQueue.get();
-            local_tail = localQueue.get();
         } while (!globalQueue.compareAndSet(my_pred, local_tail));
 
-        local_tail.setTailWhenSpliced(true);
-        while (my_pred.isSuccessorMustWait()) {}
+        if (MAX_CLUSTERS > 1) {
+            local_tail.setTailWhenSpliced(true);
+        }
+        while (my_pred.isSuccessorMustWait()) {
+            Thread.yield(); // Yield CPU while waiting
+        }
         preNode.set(my_pred);
     }
 
     public void unlock() {
-
         QNode myNode = currNode.get();
-        int myCluster = ThreadID.getCluster(MAX_CLUSTERS);
-        myNode.setClusterID(myCluster);
         myNode.setSuccessorMustWait(false);
-        QNode myPred = preNode.get();
-        if (myPred != null){
-            myPred.unlock();
-            currNode.set(myPred);
-        }
+        currNode.set(preNode.get());
     }
 
     static class QNode {
@@ -158,6 +149,7 @@ public class HCLHLock implements Lock {
                 } else if (getClusterID() != myCluster || isTailWhenSpliced()) {
                     return false;
                 }
+                Thread.yield(); // Yield CPU while waiting
             }
         }
 
